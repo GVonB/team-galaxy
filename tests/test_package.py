@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -10,7 +9,7 @@ import yaml
 from click.testing import CliRunner
 
 from team_galaxy import examples_dir, personas_dir, skills_dir
-from team_galaxy.cli import cli
+from team_galaxy.commands import galaxy
 
 
 # --------------------------------------------------------------------------- #
@@ -39,6 +38,11 @@ def test_skills_dir_contains_expected_files():
     assert "iwc_checklist.md" in names
     assert "gtn_format.md" in names
     assert "bioconda_guide.md" in names
+    # thin wrapper modules for Markdown skills
+    assert "iuc_standards_skill.py" in names
+    assert "iwc_checklist_skill.py" in names
+    assert "gtn_format_skill.py" in names
+    assert "bioconda_guide_skill.py" in names
 
 
 def test_personas_dir_contains_expected_files():
@@ -57,6 +61,27 @@ def test_examples_dir_contains_expected_scenarios():
     assert "gtn-tutorial-generator" in names
     assert "bioblend-analysis" in names
     assert "job-failure-investigator" in names
+
+
+# --------------------------------------------------------------------------- #
+# Thin wrapper modules for Markdown skills
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("skill_name,md_name", [
+    ("iuc_standards_skill", "iuc_standards.md"),
+    ("iwc_checklist_skill", "iwc_checklist.md"),
+    ("gtn_format_skill", "gtn_format.md"),
+    ("bioconda_guide_skill", "bioconda_guide.md"),
+])
+def test_md_skill_wrapper_has_skill_file(skill_name, md_name):
+    """Each thin wrapper module must set SKILL_FILE pointing to a real .md file."""
+    import importlib
+    mod = importlib.import_module(f"team_galaxy.skills.{skill_name}")
+    assert hasattr(mod, "SKILL_FILE"), f"{skill_name} must define SKILL_FILE"
+    sf = Path(mod.SKILL_FILE)
+    assert sf.is_file(), f"SKILL_FILE points to a missing file: {sf}"
+    assert sf.name == md_name
 
 
 # --------------------------------------------------------------------------- #
@@ -80,7 +105,7 @@ def test_persona_yaml_has_required_fields(yaml_path):
 
 
 # --------------------------------------------------------------------------- #
-# Example YAML validity (parseable + has required top-level keys)
+# Example YAML validity (parseable + has required top-level keys + uses short names)
 # --------------------------------------------------------------------------- #
 
 
@@ -90,11 +115,12 @@ def test_persona_yaml_has_required_fields(yaml_path):
     ids=lambda p: p.stem,
 )
 def test_example_yaml_parseable(yaml_path):
-    """Example YAMLs should parse without errors (after path token replacement)."""
+    """Example YAMLs should parse without errors and use short skill names."""
     content = yaml_path.read_text(encoding="utf-8")
-    # Replace path tokens so YAML parses cleanly (they contain no newlines)
-    content = content.replace("${TEAM_GALAXY_SKILLS}", "/tmp/skills")
-    content = content.replace("${TEAM_GALAXY_PERSONAS}", "/tmp/personas")
+    # No legacy path tokens should be present
+    assert "${TEAM_GALAXY_SKILLS}" not in content, (
+        f"{yaml_path.name} still contains legacy '${TEAM_GALAXY_SKILLS}' token"
+    )
     raw = yaml.safe_load(content)
     assert isinstance(raw, dict)
     for key in ("name", "goal", "workflow", "members"):
@@ -104,28 +130,36 @@ def test_example_yaml_parseable(yaml_path):
 
 
 # --------------------------------------------------------------------------- #
-# CLI commands
+# CLI commands (galaxy group from commands.py)
 # --------------------------------------------------------------------------- #
+
+
+def test_cli_galaxy_help():
+    runner = CliRunner()
+    result = runner.invoke(galaxy, ["--help"])
+    assert result.exit_code == 0
+    assert "Galaxy" in result.output
 
 
 def test_cli_scenarios_command():
     runner = CliRunner()
-    result = runner.invoke(cli, ["scenarios"])
+    result = runner.invoke(galaxy, ["scenarios"])
     assert result.exit_code == 0
     assert "tool-wrapper-factory" in result.output
 
 
 def test_cli_skills_command():
     runner = CliRunner()
-    result = runner.invoke(cli, ["skills"])
+    result = runner.invoke(galaxy, ["skills"])
     assert result.exit_code == 0
-    assert "bioblend.py" in result.output
-    assert "planemo.py" in result.output
+    assert "bioblend" in result.output
+    assert "planemo" in result.output
+    assert "iuc_standards" in result.output
 
 
 def test_cli_personas_command():
     runner = CliRunner()
-    result = runner.invoke(cli, ["personas"])
+    result = runner.invoke(galaxy, ["personas"])
     assert result.exit_code == 0
     assert "iuc_reviewer" in result.output
     assert "gtn_author" in result.output
@@ -133,21 +167,21 @@ def test_cli_personas_command():
 
 def test_cli_init_creates_file(tmp_path):
     runner = CliRunner()
-    result = runner.invoke(cli, ["init", "--scenario", "iwc-compliance", "--output-dir", str(tmp_path)])
+    result = runner.invoke(galaxy, ["init", "--scenario", "iwc-compliance", "--output-dir", str(tmp_path)])
     assert result.exit_code == 0, result.output
     created = tmp_path / "iwc-compliance.yaml"
     assert created.is_file()
-    # Path tokens should be resolved
     content = created.read_text()
+    # Short skill names should be in the generated file
+    assert "iwc_checklist" in content
+    # No legacy path tokens
     assert "${TEAM_GALAXY_SKILLS}" not in content
-    assert str(skills_dir()) in content
 
 
 def test_cli_init_refuses_overwrite_without_force(tmp_path):
     runner = CliRunner()
-    # Create the file first
     (tmp_path / "iwc-compliance.yaml").write_text("existing")
-    result = runner.invoke(cli, ["init", "--scenario", "iwc-compliance", "--output-dir", str(tmp_path)])
+    result = runner.invoke(galaxy, ["init", "--scenario", "iwc-compliance", "--output-dir", str(tmp_path)])
     assert result.exit_code != 0
     assert "already exists" in result.output
 
@@ -156,7 +190,7 @@ def test_cli_init_force_overwrites(tmp_path):
     runner = CliRunner()
     (tmp_path / "iwc-compliance.yaml").write_text("existing")
     result = runner.invoke(
-        cli, ["init", "--scenario", "iwc-compliance", "--output-dir", str(tmp_path), "--force"]
+        galaxy, ["init", "--scenario", "iwc-compliance", "--output-dir", str(tmp_path), "--force"]
     )
     assert result.exit_code == 0
     content = (tmp_path / "iwc-compliance.yaml").read_text()

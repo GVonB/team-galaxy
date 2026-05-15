@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "team-galaxy"
-version = "0.1.0"
+version = "0.2.0"
 description = "Galaxy Project extensions for the team multi-agent LLM framework."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -19,7 +19,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "team-core>=0.15.4",
+    "team-core>=0.15.5",
     "click>=8.1",
     "rich>=13.0",
 ]
@@ -32,8 +32,20 @@ dev = [
 ]
 all = ["team-galaxy[bioblend]"]
 
-[project.scripts]
-team-galaxy = "team_galaxy.cli:cli"
+[project.entry-points."team.persona_dirs"]
+galaxy = "team_galaxy:personas_dir"
+
+[project.entry-points."team.skills"]
+bioblend       = "team_galaxy.skills.bioblend"
+planemo        = "team_galaxy.skills.planemo"
+toolshed       = "team_galaxy.skills.toolshed"
+iuc_standards  = "team_galaxy.skills.iuc_standards_skill"
+iwc_checklist  = "team_galaxy.skills.iwc_checklist_skill"
+gtn_format     = "team_galaxy.skills.gtn_format_skill"
+bioconda_guide = "team_galaxy.skills.bioconda_guide_skill"
+
+[project.entry-points."team.commands"]
+galaxy = "team_galaxy.commands:galaxy"
 
 [project.urls]
 Homepage = "https://github.com/cumbof/team-galaxy"

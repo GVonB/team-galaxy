@@ -58,9 +58,9 @@ defaults:
     - list_files
     - web_search
   skills:
-    - path: ${TEAM_GALAXY_SKILLS}/iuc_standards.md
-    - path: ${TEAM_GALAXY_SKILLS}/planemo.py
-    - path: ${TEAM_GALAXY_SKILLS}/toolshed.py
+    - iuc_standards
+    - planemo
+    - toolshed
 
 members:
   - name: xml_author

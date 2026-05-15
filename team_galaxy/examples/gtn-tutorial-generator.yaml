@@ -56,8 +56,8 @@ defaults:
     - write_file
     - list_files
   skills:
-    - path: ${TEAM_GALAXY_SKILLS}/gtn_format.md
-    - path: ${TEAM_GALAXY_SKILLS}/toolshed.py
+    - gtn_format
+    - toolshed
 
 members:
   - name: writer

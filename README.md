@@ -7,10 +7,15 @@ multi-agent LLM framework.
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/cumbof/team-galaxy/blob/main/LICENSE)
 
 `team-galaxy` adds Galaxy-specific skills, personas, and ready-to-run scenario
-configs on top of `team-core`.  It does not require any changes to `team-core`
-— it uses the two built-in extension points already present in the framework:
-the **skills** system (`.py` and `.md` files loaded via `skills:` in your team
-YAML) and the **persona library** (any directory pointed to by `TEAM_PERSONA_DIR`).
+configs on top of `team-core`.  Installing `team-galaxy` is all it takes —
+no environment variables or hardcoded paths required.  It integrates with
+`team-core` ≥ 0.15.5 via Python entry points:
+
+| Entry-point group | What it contributes |
+|---|---|
+| `team.skills` | Short skill names (`bioblend`, `planemo`, …) usable anywhere in a YAML |
+| `team.persona_dirs` | Galaxy personas auto-discoverable with the `@name` shorthand |
+| `team.commands` | `team galaxy` subcommand injected into the `team` CLI |
 
 > [!NOTE]
 >
@@ -74,11 +79,11 @@ pip install -e ".[dev,bioblend]"
 ### 1. Initialise a scenario
 
 ```bash
-team-galaxy init --scenario tool-wrapper-factory
+team galaxy init --scenario tool-wrapper-factory
 ```
 
-This copies a ready-to-edit YAML config to the current directory with all
-skill and persona paths already resolved to the installed package location.
+This copies a ready-to-edit YAML config to the current directory.  Skill
+references use short registered names — no paths to edit.
 
 ### 2. Prepare your workspace
 
@@ -104,15 +109,7 @@ fastp: an ultra-fast all-in-one FASTQ preprocessor
 - Output: fastqsanger.gz (trimmed reads), html (QC report), json (QC metrics)
 ```
 
-### 3. Activate Galaxy personas (optional)
-
-To use Galaxy-specific personas with the `@name` shorthand in your YAML:
-
-```bash
-export TEAM_PERSONA_DIR=$(python -c "from team_galaxy import personas_dir; print(personas_dir())")
-```
-
-### 4. Run
+### 3. Run
 
 ```bash
 team run tool-wrapper-factory.yaml
@@ -122,46 +119,38 @@ team run tool-wrapper-factory.yaml
 
 ## Skills
 
-Skills are the core extension mechanism.  Add them to any team YAML under `skills:`.
+After `pip install team-galaxy`, use skill names directly in any team YAML:
 
 ```yaml
 defaults:
   skills:
-    - path: /path/to/team_galaxy/skills/bioblend.py    # Galaxy API tools
-    - path: /path/to/team_galaxy/skills/planemo.py     # planemo tools
-    - path: /path/to/team_galaxy/skills/toolshed.py    # Tool Shed tools
-    - path: /path/to/team_galaxy/skills/iuc_standards.md    # context injection
-    - path: /path/to/team_galaxy/skills/iwc_checklist.md    # context injection
-    - path: /path/to/team_galaxy/skills/gtn_format.md       # context injection
-    - path: /path/to/team_galaxy/skills/bioconda_guide.md   # context injection
+    - bioblend        # Galaxy API tools (requires bioblend extra)
+    - planemo         # planemo lint / test / autoupdate tools
+    - toolshed        # Tool Shed search and metadata tools
+    - iuc_standards   # IUC authoring standards (context injection)
+    - iwc_checklist   # IWC workflow quality checklist (context injection)
+    - gtn_format      # GTN tutorial format specification (context injection)
+    - bioconda_guide  # Bioconda packaging guide (context injection)
 ```
-
-Get the paths programmatically:
-
-```python
-from team_galaxy import skills_dir
-print(skills_dir())  # /path/to/team_galaxy/skills
-```
-
-Or let `team-galaxy init` resolve them automatically in generated configs.
 
 ### Available skills
 
-| File | Type | Provides |
+| Name | Type | Provides |
 |---|---|---|
-| `bioblend.py` | Python | `galaxy_upload`, `galaxy_run_tool`, `galaxy_invoke_workflow`, `galaxy_job_status`, `galaxy_wait_for_job`, `galaxy_download`, `galaxy_search_tools`, `galaxy_create_history`, `galaxy_get_histories`, `galaxy_show_dataset` |
-| `planemo.py` | Python | `planemo_lint`, `planemo_test`, `planemo_workflow_lint`, `planemo_workflow_test`, `planemo_autoupdate`, `planemo_shed_lint` |
-| `toolshed.py` | Python | `toolshed_search`, `toolshed_tool_info`, `toolshed_categories`, `toolshed_owner_repos` |
-| `iuc_standards.md` | Markdown | IUC tool XML authoring standards injected into system prompt |
-| `iwc_checklist.md` | Markdown | IWC workflow quality checklist injected into system prompt |
-| `gtn_format.md` | Markdown | GTN tutorial Markdown format specification |
-| `bioconda_guide.md` | Markdown | Bioconda recipe packaging guide |
+| `bioblend` | Python tools | `galaxy_upload`, `galaxy_run_tool`, `galaxy_invoke_workflow`, `galaxy_job_status`, `galaxy_wait_for_job`, `galaxy_download`, `galaxy_search_tools`, `galaxy_create_history`, `galaxy_get_histories`, `galaxy_show_dataset` |
+| `planemo` | Python tools | `planemo_lint`, `planemo_test`, `planemo_workflow_lint`, `planemo_workflow_test`, `planemo_autoupdate`, `planemo_shed_lint` |
+| `toolshed` | Python tools | `toolshed_search`, `toolshed_tool_info`, `toolshed_categories`, `toolshed_owner_repos` |
+| `iuc_standards` | Markdown context | IUC tool XML authoring standards injected into system prompt |
+| `iwc_checklist` | Markdown context | IWC workflow quality checklist injected into system prompt |
+| `gtn_format` | Markdown context | GTN tutorial Markdown format specification |
+| `bioconda_guide` | Markdown context | Bioconda recipe packaging guide |
 
 ---
 
 ## Personas
 
-Galaxy-specific personas extend the built-in `team-core` persona library.
+Galaxy-specific personas are automatically discovered when `team-galaxy` is
+installed.  No `TEAM_PERSONA_DIR` needed.
 
 | Key | Role | Description |
 |---|---|---|
@@ -171,13 +160,7 @@ Galaxy-specific personas extend the built-in `team-core` persona library.
 | `@galaxy_admin` | Galaxy System Administrator | Manages Galaxy instance infrastructure and job routing |
 | `@tool_wrapper_author` | Galaxy Tool Wrapper Author | Expert in writing IUC-compliant Galaxy tool XML wrappers |
 
-Activate them by pointing `TEAM_PERSONA_DIR` at the personas directory:
-
-```bash
-export TEAM_PERSONA_DIR=$(python -c "from team_galaxy import personas_dir; print(personas_dir())")
-```
-
-Then reference them in any team YAML:
+Reference them in any team YAML:
 
 ```yaml
 members:
@@ -189,42 +172,43 @@ members:
 
 ## How it extends `team-core`
 
-`team-galaxy` uses `team-core`'s two existing extension points — **no core
-changes required**:
+`team-galaxy` uses the three entry-point groups added in `team-core` ≥ 0.15.5:
 
 ```
-team-core extension points
-├── skills:           ← team_galaxy/skills/*.py  (new callable tools)
-│                        team_galaxy/skills/*.md  (context injections)
-└── TEAM_PERSONA_DIR  ← team_galaxy/personas/*.yaml  (Galaxy personas)
+team-core plugin API
+├── team.skills          ← bioblend, planemo, toolshed, iuc_standards, …
+├── team.persona_dirs    ← team_galaxy/personas/ (auto-merged)
+└── team.commands        ← team galaxy <subcommand>
 ```
 
-The `team-galaxy init` CLI command resolves all installed paths and writes
-them into the generated YAML so you never have to find them manually.
+This means:
+- Skill names work in **any** team YAML, not just team-galaxy ones.
+- Personas are available via `@name` without any env var.
+- `team galaxy --help` is always accessible once `team-galaxy` is installed.
 
 ---
 
 ## CLI reference
 
 ```
-team-galaxy --help
+team galaxy --help
 
 Commands:
-  init       Copy a scenario template to a directory with resolved paths.
+  init       Copy a scenario template to a directory, ready to run.
   scenarios  List available scenario templates.
-  skills     List available Galaxy skills with descriptions.
+  skills     List available Galaxy skill names and descriptions.
   personas   List available Galaxy personas with descriptions.
 ```
 
 ```bash
 # List scenarios
-team-galaxy scenarios
+team galaxy scenarios
 
 # Initialise a scenario in the current directory
-team-galaxy init --scenario bioblend-analysis
+team galaxy init --scenario bioblend-analysis
 
 # Initialise in a specific directory
-team-galaxy init --scenario tool-wrapper-factory --output-dir ~/my-project/
+team galaxy init --scenario tool-wrapper-factory --output-dir ~/my-project/
 ```
 
 ---

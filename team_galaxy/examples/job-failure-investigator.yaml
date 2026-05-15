@@ -51,8 +51,8 @@ defaults:
     - read_file
     - write_file
   skills:
-    - path: ${TEAM_GALAXY_SKILLS}/bioblend.py
-    - path: ${TEAM_GALAXY_SKILLS}/toolshed.py
+    - bioblend
+    - toolshed
 
 members:
   - name: log_reader

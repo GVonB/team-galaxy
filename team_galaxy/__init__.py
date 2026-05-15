@@ -1,17 +1,37 @@
 """team-galaxy — Galaxy Project extensions for the team multi-agent LLM framework.
 
 Provides Galaxy-specific skills, personas, and ready-to-run example configs that
-plug directly into ``team-core`` without requiring any changes to the core package.
+plug directly into ``team-core`` via Python entry points.  Installing
+``team-galaxy`` is all it takes — no paths, no environment variables needed.
 
-Extension points used
----------------------
-* **Skills** — ``team-core`` accepts any ``.py`` or ``.md`` file as a skill via the
-  ``skills:`` list in a team YAML.  Use :func:`skills_dir` to get the path to
-  the built-in team-galaxy skills, then reference individual files in your YAML.
+Extension points registered
+---------------------------
+``team.skills``
+    Short skill names usable anywhere in a team YAML ``skills:`` list::
 
-* **Personas** — ``team-core`` scans ``TEAM_PERSONA_DIR`` (env var) in addition to
-  its own built-in ``personas/`` directory.  Set it to :func:`personas_dir` to make
-  Galaxy personas available with the ``@name`` shorthand.
+        skills:
+          - bioblend        # BioBlend Galaxy API tools
+          - planemo         # planemo lint / test / autoupdate tools
+          - toolshed        # Tool Shed search and metadata tools
+          - iuc_standards   # IUC authoring standards (context injection)
+          - iwc_checklist   # IWC workflow quality checklist (context injection)
+          - gtn_format      # GTN tutorial format (context injection)
+          - bioconda_guide  # Bioconda packaging guide (context injection)
+
+``team.persona_dirs``
+    The ``team_galaxy/personas/`` directory is automatically merged into the
+    persona library.  Reference personas with the ``@`` shorthand::
+
+        persona: "@iuc_reviewer"
+
+``team.commands``
+    A ``galaxy`` subcommand group is injected into the ``team`` CLI::
+
+        team galaxy --help
+        team galaxy init --scenario tool-wrapper-factory
+        team galaxy scenarios
+        team galaxy skills
+        team galaxy personas
 
 Quick start
 -----------
@@ -27,7 +47,7 @@ Set Galaxy credentials (only needed for BioBlend skill)::
 
 Initialise a ready-to-run scenario config in the current directory::
 
-    team-galaxy init --scenario tool-wrapper-factory
+    team galaxy init --scenario tool-wrapper-factory
 
 Then run it::
 
@@ -52,11 +72,6 @@ Environment variables
 ``GALAXY_API_KEY``
     Galaxy API key with sufficient permissions.
     Required by the BioBlend skill.
-
-``TEAM_PERSONA_DIR``
-    Set to :func:`personas_dir` to activate the Galaxy persona library::
-
-        export TEAM_PERSONA_DIR=$(python -c "from team_galaxy import personas_dir; print(personas_dir())")
 """
 
 from __future__ import annotations

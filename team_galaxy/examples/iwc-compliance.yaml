@@ -51,8 +51,8 @@ defaults:
     - write_file
     - list_files
   skills:
-    - path: ${TEAM_GALAXY_SKILLS}/iwc_checklist.md
-    - path: ${TEAM_GALAXY_SKILLS}/planemo.py
+    - iwc_checklist
+    - planemo
 
 members:
   - name: linter

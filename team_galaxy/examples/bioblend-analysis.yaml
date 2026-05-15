@@ -62,7 +62,7 @@ defaults:
     - recall
     - log_decision
   skills:
-    - path: ${TEAM_GALAXY_SKILLS}/bioblend.py
+    - bioblend
 
 members:
   - name: analyst
