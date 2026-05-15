@@ -1,0 +1,104 @@
+# Galaxy BioBlend Analysis
+#
+# A team that designs and executes a multi-step bioinformatics analysis
+# via the Galaxy API using BioBlend.  The analyst decides the analysis strategy,
+# the programmer executes Galaxy API calls, and the reporter interprets results.
+#
+# Before running:
+#   pip install "team-galaxy[bioblend]"
+#   export GALAXY_URL=https://usegalaxy.org
+#   export GALAXY_API_KEY=<your_api_key>
+#   team-galaxy init --scenario bioblend-analysis
+#
+# Place analysis_spec.md in the workspace with:
+#   - The biological question and dataset description
+#   - Input file paths (will be uploaded to Galaxy) or existing history/dataset IDs
+#   - The expected output(s) and how to interpret them
+#
+# Run:
+#   team run bioblend-analysis.yaml
+
+name: bioblend-analysis
+goal: |
+  Execute the bioinformatics analysis described in analysis_spec.md using the
+  Galaxy server via BioBlend.
+
+  Steps:
+    1. Read analysis_spec.md to understand the goal and inputs.
+    2. Create a new Galaxy history named for this analysis run.
+    3. Upload input files (or identify existing datasets).
+    4. Design and execute the analysis pipeline step by step.
+    5. Download key result files to the workspace.
+    6. Write analysis_report.md summarising: pipeline steps, tool versions used,
+       key results with biological interpretation, and any quality flags.
+
+  The team is done when analysis_report.md is written and all key outputs
+  are downloaded to results/ in the workspace.
+
+workspace: ./runs/bioblend-analysis
+
+workflow:
+  type: manager
+  max_rounds: 20
+  manager: analyst
+  options:
+    kickoff_prompt: |
+      @analyst — Read analysis_spec.md and design the analysis strategy.
+      Identify the required Galaxy tools, then delegate execution steps to
+      @programmer.  After each step, have @programmer verify the job completed
+      successfully before proceeding.
+
+defaults:
+  ollama_image: ollama/ollama:latest
+  context_window: 16384
+  temperature: 0.2
+  tool_mode: text
+  tools:
+    - run_python
+    - read_file
+    - write_file
+    - web_search
+    - remember
+    - recall
+    - log_decision
+  skills:
+    - path: ${TEAM_GALAXY_SKILLS}/bioblend.py
+
+members:
+  - name: analyst
+    role: Bioinformatics Analyst
+    model: llama3.1:70b
+    temperature: 0.2
+    persona: "@bioinformatician"
+    persona_reinforcement: true
+    extra_system: |
+      You design the analysis strategy and make all biological decisions.
+      You delegate Galaxy API execution steps to @programmer with precise
+      instructions (which tool, which parameters, which history/dataset IDs).
+      You use `remember` to store key dataset IDs and results between turns.
+      You always end your turn with NEXT: @<member> to nominate who acts next,
+      or [[TEAM_DONE]] when analysis_report.md is written and results downloaded.
+
+  - name: programmer
+    role: BioBlend Programmer
+    model: qwen2.5-coder:14b
+    temperature: 0.1
+    extra_system: |
+      You execute Galaxy operations using the BioBlend tools.
+      For each step:
+        1. Call the appropriate galaxy_* tool.
+        2. Record the returned job/dataset IDs.
+        3. Call galaxy_wait_for_job to wait for completion.
+        4. Report the final state and dataset IDs back to the analyst.
+      Always end with NEXT: @analyst.
+
+  - name: reporter
+    role: Analysis Reporter
+    model: llama3.1:8b
+    temperature: 0.4
+    persona: "@pi"
+    extra_system: |
+      When called by the analyst, read all downloaded result files and write
+      analysis_report.md.  Interpret results in biological terms.  Flag any
+      quality issues (low coverage, poor mapping rate, unexpected output size).
+      End with NEXT: @analyst.

@@ -1,0 +1,88 @@
+# Galaxy Tool Wrapper Factory
+#
+# A team that generates a complete IUC-compliant Galaxy tool wrapper
+# from a command-line tool's --help text and conda package name.
+#
+# Workflow: review_loop — the xml_author produces, the iuc_reviewer critiques
+# with planemo lint, and they iterate until the tool passes cleanly.
+#
+# Before running:
+#   team-galaxy init --scenario tool-wrapper-factory
+#
+# Populate the workspace with a file named `tool_spec.md` containing:
+#   - The tool name and conda package name
+#   - The output of `<tool> --help` (or `<tool> --help 2>&1`)
+#   - The desired Galaxy datatypes for inputs/outputs
+#   - (Optional) a link to the tool's paper or GitHub page
+#
+# Then run:
+#   team run tool-wrapper-factory.yaml
+
+name: tool-wrapper-factory
+goal: |
+  Read tool_spec.md from the workspace.  Produce a complete, IUC-compliant
+  Galaxy tool wrapper directory containing:
+    - tool.xml  (passes `planemo lint` with no errors or warnings)
+    - macros.xml
+    - test-data/<input files>  (minimal but realistic)
+  
+  The wrapper must:
+    1. Use the conda package named in tool_spec.md, pinned to an exact version.
+    2. Expose every meaningful parameter from --help as a <param>.
+    3. Include at least two <test> blocks covering different parameter combinations.
+    4. Have a <help> section and a <citations> block.
+    5. Pass `planemo lint tool.xml` with exit code 0.
+
+workspace: ./runs/tool-wrapper-factory
+
+workflow:
+  type: review_loop
+  max_rounds: 8
+  options:
+    producer: xml_author
+    reviewer: iuc_reviewer
+    kickoff_prompt: |
+      @xml_author — Read tool_spec.md and produce the complete tool wrapper.
+      Start with macros.xml and tool.xml, then generate test-data/ files.
+
+defaults:
+  ollama_image: ollama/ollama:latest
+  context_window: 16384
+  temperature: 0.2
+  tool_mode: text
+  tools:
+    - run_bash
+    - run_python
+    - read_file
+    - write_file
+    - list_files
+    - web_search
+  skills:
+    - path: ${TEAM_GALAXY_SKILLS}/iuc_standards.md
+    - path: ${TEAM_GALAXY_SKILLS}/planemo.py
+    - path: ${TEAM_GALAXY_SKILLS}/toolshed.py
+
+members:
+  - name: xml_author
+    role: Galaxy Tool Wrapper Author
+    model: qwen2.5-coder:32b
+    temperature: 0.1
+    persona: "@tool_wrapper_author"
+    persona_reinforcement: true
+    extra_system: |
+      After writing the initial tool.xml and macros.xml, always run
+      `planemo_lint tool.xml` and fix every reported issue before finishing
+      your turn.  Write test-data/ files as small valid examples of the
+      expected input format.
+
+  - name: iuc_reviewer
+    role: IUC Tool Reviewer
+    model: llama3.1:70b
+    temperature: 0.1
+    persona: "@iuc_reviewer"
+    persona_reinforcement: true
+    extra_system: |
+      Review the tool wrapper produced by xml_author.  Run `planemo_lint tool.xml`
+      and report the full output.  List every issue as a numbered action item.
+      If there are no issues and planemo lint exits 0, end your reply with APPROVED.
+      Do NOT approve until planemo lint passes cleanly.

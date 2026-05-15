@@ -1,0 +1,92 @@
+# IWC Workflow Compliance
+#
+# A team that brings a Galaxy workflow to full IWC quality-gate compliance:
+# planemo workflow_lint passes, companion files are complete, and the
+# submission is ready to open as a PR to iwc-workflows.
+#
+# Before running:
+#   team-galaxy init --scenario iwc-compliance
+#
+# Place your .ga workflow file in the workspace root, then set the
+# WORKFLOW_FILE variable in the goal below to its filename.
+#
+# Run:
+#   team run iwc-compliance.yaml
+
+name: iwc-compliance
+goal: |
+  Bring the Galaxy workflow file in the workspace to full IWC compliance.
+  
+  Steps:
+    1. Run `planemo_workflow_lint <workflow.ga>` and list all issues.
+    2. Patch the .ga JSON to fix every lint issue:
+         - annotation (workflow-level and all steps)
+         - license (SPDX identifier)
+         - creator (class, identifier ORCID URL, name)
+         - output labels
+         - formal input labels
+    3. Generate (or update) these companion files:
+         - <workflow-name>-tests.yml  with at least one test case
+         - CHANGELOG.md  (Keep a Changelog format, version 0.1)
+         - README.md     (inputs/outputs table, tools used, citation)
+         - .dockstore.yml
+    4. Run `planemo_workflow_lint <workflow.ga>` again to confirm exit 0.
+    5. Declare done when all files are present and lint passes cleanly.
+
+workspace: ./runs/iwc-compliance
+
+workflow:
+  type: sequential_chain
+  max_rounds: 6
+
+defaults:
+  ollama_image: ollama/ollama:latest
+  context_window: 16384
+  temperature: 0.2
+  tool_mode: text
+  tools:
+    - run_python
+    - run_bash
+    - read_file
+    - write_file
+    - list_files
+  skills:
+    - path: ${TEAM_GALAXY_SKILLS}/iwc_checklist.md
+    - path: ${TEAM_GALAXY_SKILLS}/planemo.py
+
+members:
+  - name: linter
+    role: Workflow Linter
+    model: qwen2.5-coder:14b
+    temperature: 0.1
+    persona: "@iwc_curator"
+    persona_reinforcement: true
+    extra_system: |
+      Your task: run `planemo_workflow_lint` on every .ga file in the workspace
+      and produce a structured list of all issues, grouped by category
+      (metadata, steps, outputs, inputs).  Save the report to lint_report.md.
+      End your turn when lint_report.md is written.
+
+  - name: fixer
+    role: Workflow Fixer
+    model: qwen2.5-coder:32b
+    temperature: 0.1
+    persona: "@tool_wrapper_author"
+    extra_system: |
+      Read lint_report.md and the .ga workflow file.  Fix every issue by
+      patching the .ga JSON with Python (run_python).  Write the fixed .ga
+      back to disk.  Run `planemo_workflow_lint` again to verify all fixes.
+      End your turn when planemo workflow_lint exits 0.
+
+  - name: documenter
+    role: IWC Documentation Writer
+    model: llama3.1:8b
+    temperature: 0.3
+    persona: "@iwc_curator"
+    extra_system: |
+      Read the fixed .ga workflow file and write all required companion files:
+        - <name>-tests.yml (tests stub with correct input/output structure)
+        - CHANGELOG.md  (Keep a Changelog format)
+        - README.md     (inputs/outputs table, tools, citation)
+        - .dockstore.yml
+      End your turn by outputting [[TEAM_DONE]] once all files are present.

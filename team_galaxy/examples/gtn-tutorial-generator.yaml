@@ -1,0 +1,86 @@
+# GTN Tutorial Generator
+#
+# A team that converts a Galaxy workflow (.ga file) into a complete
+# Galaxy Training Network (GTN) tutorial in the correct Markdown format.
+#
+# Before running:
+#   team-galaxy init --scenario gtn-tutorial-generator
+#
+# Place in the workspace:
+#   - workflow.ga      — the Galaxy workflow to document
+#   - tutorial_spec.md — brief description: biology, audience level, questions to answer
+#
+# Run:
+#   team run gtn-tutorial-generator.yaml
+
+name: gtn-tutorial-generator
+goal: |
+  Convert the Galaxy workflow in the workspace into a complete GTN tutorial.
+
+  Deliverables (all in the workspace):
+    - tutorial.md        with correct YAML front matter, hands-on blocks,
+                         question/solution pairs, and key points
+    - data-library.yaml  listing Zenodo datasets (stub with placeholder Zenodo URL
+                         if real data is not available)
+    - workflow.ga        (the input workflow, unchanged)
+
+  Requirements:
+    - Every tool must be referenced as {% tool [Name](toolshed_id) %}
+    - Every hands-on step must interpret the output biologically
+    - At least 2 question/solution blocks
+    - YAML front matter must include: layout, title, zenodo_link, questions,
+      objectives, time_estimation, level, key_points, contributors
+    - Tutorial must follow the GTN format specification exactly
+
+workspace: ./runs/gtn-tutorial-generator
+
+workflow:
+  type: review_loop
+  max_rounds: 6
+  options:
+    producer: writer
+    reviewer: gtn_reviewer
+    kickoff_prompt: |
+      @writer — Read workflow.ga and tutorial_spec.md and produce the complete
+      tutorial.md.  Use the ToolShed search tool to verify exact tool IDs.
+
+defaults:
+  ollama_image: ollama/ollama:latest
+  context_window: 16384
+  temperature: 0.3
+  tool_mode: text
+  tools:
+    - run_python
+    - web_search
+    - read_file
+    - write_file
+    - list_files
+  skills:
+    - path: ${TEAM_GALAXY_SKILLS}/gtn_format.md
+    - path: ${TEAM_GALAXY_SKILLS}/toolshed.py
+
+members:
+  - name: writer
+    role: GTN Tutorial Author
+    model: llama3.1:70b
+    temperature: 0.3
+    persona: "@gtn_author"
+    persona_reinforcement: true
+    extra_system: |
+      Write the tutorial in teaching order: introduce the biology → upload data
+      → run each tool step → interpret results → answer questions.
+      Use `toolshed_search` to look up every tool's ToolShed ID before referencing it.
+      Save the tutorial to tutorial.md and data-library.yaml when done.
+
+  - name: gtn_reviewer
+    role: GTN Format Reviewer
+    model: llama3.1:8b
+    temperature: 0.1
+    persona: "@iuc_reviewer"
+    extra_system: |
+      Review tutorial.md against the GTN format specification.
+      Check for: correct YAML front matter fields, valid tool reference syntax
+      {% tool [Name](id) %}, hands-on block syntax {: .hands_on}, question/solution
+      blocks, and at least 2 of each block type.
+      List every format violation as a numbered item.
+      If there are no violations, end with APPROVED.

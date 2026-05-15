@@ -1,0 +1,108 @@
+# Galaxy Job Failure Investigator
+#
+# A team that investigates a failed Galaxy job, diagnoses the root cause,
+# and produces an actionable report with a suggested fix and a user-facing
+# explanation.
+#
+# Before running:
+#   pip install "team-galaxy[bioblend]"
+#   export GALAXY_URL=https://usegalaxy.org
+#   export GALAXY_API_KEY=<your_api_key>
+#   team-galaxy init --scenario job-failure-investigator
+#
+# Place job_spec.md in the workspace with:
+#   - The Galaxy job ID (or dataset ID)
+#   - Any context the user provided about what they were trying to do
+#   - The input dataset description (file format, size, organism)
+#
+# Run:
+#   team run job-failure-investigator.yaml
+
+name: job-failure-investigator
+goal: |
+  Investigate the failed Galaxy job described in job_spec.md and produce:
+    - diagnosis.md  containing:
+        * Error category (input format error / parameter error / resource limit /
+          tool bug / infrastructure error)
+        * Root cause (exact error message and what caused it)
+        * Suggested fix (specific steps the user can take)
+        * Confidence: High / Medium / Low
+    - user_message.md  containing a clear, jargon-free explanation and fix
+        suitable to send directly to the user who reported the failure.
+
+  Optional: if the error appears to be a tool bug, also produce
+    - github_issue.md  with a draft GitHub issue for the tool repository.
+
+workspace: ./runs/job-failure-investigator
+
+workflow:
+  type: sequential_chain
+  max_rounds: 6
+
+defaults:
+  ollama_image: ollama/ollama:latest
+  context_window: 16384
+  temperature: 0.2
+  tool_mode: text
+  tools:
+    - run_python
+    - web_search
+    - read_url
+    - read_file
+    - write_file
+  skills:
+    - path: ${TEAM_GALAXY_SKILLS}/bioblend.py
+    - path: ${TEAM_GALAXY_SKILLS}/toolshed.py
+
+members:
+  - name: log_reader
+    role: Job Log Analyst
+    model: qwen2.5-coder:14b
+    temperature: 0.1
+    extra_system: |
+      Read job_spec.md to get the job ID.
+      Use `galaxy_job_status` to fetch full job details.
+      Then use run_python with BioBlend to fetch the job's stderr and stdout:
+
+          import os
+          from bioblend.galaxy import GalaxyInstance
+          gi = GalaxyInstance(os.environ["GALAXY_URL"], key=os.environ["GALAXY_API_KEY"])
+          # For stderr/stdout, use the job's output datasets
+          job = gi.jobs.show_job("<job_id>", full_details=True)
+          print(job)
+
+      Write the raw logs and job metadata to job_logs.md.
+      Identify the error type (exit code, OOM, format error, timeout, etc.).
+
+  - name: domain_expert
+    role: Bioinformatics Debugger
+    model: llama3.1:70b
+    temperature: 0.2
+    persona: "@bioinformatician"
+    persona_reinforcement: true
+    extra_system: |
+      Read job_logs.md.  Use web_search and read_url to look up the exact
+      error message against the tool's documentation, GitHub issues, and
+      Biostars/Galaxy help forum.
+      Diagnose the root cause. Distinguish between:
+        - User error (wrong input format, bad parameters)
+        - Tool bug (unexpected crash, wrong output for valid input)
+        - Resource issue (OOM, timeout, disk full)
+        - Infrastructure issue (node failure, network error)
+      Write your diagnosis to raw_diagnosis.md.
+
+  - name: communicator
+    role: User Communication Specialist
+    model: llama3.1:8b
+    temperature: 0.4
+    extra_system: |
+      Read raw_diagnosis.md.
+      Write two files:
+        1. diagnosis.md  — structured technical diagnosis with error category,
+           root cause, fix steps, and confidence rating.
+        2. user_message.md  — friendly, jargon-free message explaining what
+           went wrong and exactly what the user should do to fix it.
+           Assume the user is a biologist with no command-line experience.
+      If raw_diagnosis.md indicates a likely tool bug, also write github_issue.md
+      with a minimal reproducible issue template.
+      End with [[TEAM_DONE]].
