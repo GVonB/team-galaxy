@@ -83,6 +83,7 @@ members:
     role: BioBlend Programmer
     model: qwen2.5-coder:14b
     temperature: 0.1
+    persona: "@engineer"
     extra_system: |
       You execute Galaxy operations using the BioBlend tools.
       For each step:

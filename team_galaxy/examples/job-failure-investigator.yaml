@@ -59,6 +59,7 @@ members:
     role: Job Log Analyst
     model: qwen2.5-coder:14b
     temperature: 0.1
+    persona: "@galaxy_admin"
     extra_system: |
       Read job_spec.md to get the job ID.
       Use `galaxy_job_status` to fetch full job details.
@@ -95,6 +96,7 @@ members:
     role: User Communication Specialist
     model: llama3.1:8b
     temperature: 0.4
+    persona: "@tech_writer"
     extra_system: |
       Read raw_diagnosis.md.
       Write two files:
