@@ -274,7 +274,7 @@ def _galaxy_wait_for_job(body: str, **_: Any) -> str:
                 info = gi.jobs.show_job(job_id)
                 state = info.get("state", "unknown")
             else:
-                info = gi.datasets.show_dataset(dataset_id)
+                info = gi.datasets.show_dataset(str(dataset_id))
                 state = info.get("state", "unknown")
         except Exception as exc:  # noqa: BLE001
             return f"ERROR polling state: {exc}"
@@ -287,9 +287,7 @@ def _galaxy_wait_for_job(body: str, **_: Any) -> str:
     return f"ERROR: Timed out after {timeout}s waiting for terminal state."
 
 
-def _galaxy_download(
-    body: str, *, workspace_path: Path | None = None, **_: Any
-) -> str:
+def _galaxy_download(body: str, *, workspace_path: Path | None = None, **_: Any) -> str:
     try:
         params = _parse_json(body)
     except ValueError as exc:
@@ -312,7 +310,9 @@ def _galaxy_download(
 
     try:
         gi = _gi()
-        gi.datasets.download_dataset(dataset_id, file_path=str(dest), use_default_filename=False)
+        gi.datasets.download_dataset(
+            dataset_id, file_path=str(dest), use_default_filename=False
+        )
         return f"Downloaded dataset {dataset_id} → {dest} ({dest.stat().st_size} bytes)"
     except Exception as exc:  # noqa: BLE001
         return f"ERROR: {exc}"
@@ -439,8 +439,7 @@ TOOL_DESCRIPTIONS = {
         "Body: plain-text search query string."
     ),
     "galaxy_create_history": (
-        "Create a new Galaxy history and return its ID. "
-        "Body: history name string."
+        "Create a new Galaxy history and return its ID. Body: history name string."
     ),
     "galaxy_get_histories": (
         "List the 20 most recent Galaxy histories. Body: ignored."
