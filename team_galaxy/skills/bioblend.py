@@ -91,6 +91,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -98,6 +99,10 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 _MAX_OUTPUT = 4096
+
+# Tool panel cache, populated on first fetch
+# empty = not yet fetched, [0] = flat list of tool dicts
+_tool_panel_cache: list[list[dict]] = []
 
 
 # --------------------------------------------------------------------------- #
@@ -139,6 +144,25 @@ def _parse_json(body: str) -> dict:
         return json.loads(body.strip())
     except json.JSONDecodeError as exc:
         raise ValueError(f"Body must be valid JSON: {exc}") from exc
+
+
+def _get_panel_flat() -> list[dict]:
+    if _tool_panel_cache:
+        return _tool_panel_cache[0]
+    gi = _gi()
+    flat: list[dict] = []
+    for section in gi.tools.get_tool_panel():
+        section_name = section.get("name", "")
+        for t in section.get("elems", []):
+            if t.get("model_class") == "Tool":
+                flat.append({
+                    "id": t.get("id", ""),
+                    "name": t.get("name", ""),
+                    "description": t.get("description") or "",
+                    "section": section_name,
+                })
+    _tool_panel_cache.append(flat)
+    return _tool_panel_cache[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -319,23 +343,47 @@ def _galaxy_download(body: str, *, workspace_path: Path | None = None, **_: Any)
 
 
 def _galaxy_search_tools(body: str, **_: Any) -> str:
-    query = body.strip()
-    if not query:
-        return "ERROR: Provide a search query string."
+    raw = body.strip()
+    # native tool_mode sends JSON: {"pattern": "bwa|bowtie2"}
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            raw = parsed.get("pattern") or parsed.get("query") or parsed.get("name") or raw
+    except json.JSONDecodeError:
+        pass
+
+    if not raw:
+        return "ERROR: Provide a regex pattern, e.g. 'bwa|bowtie2|hisat2'."
+    try:
+        rx = re.compile(raw, re.IGNORECASE)
+    except re.error as exc:
+        return f"ERROR: Invalid regex: {exc}"
+
+    def _do():
+        return [
+            {"id": t["id"], "name": t["name"], "description": t["description"], "section": t["section"]}
+            for t in _get_panel_flat()
+            if rx.search(t["id"]) or rx.search(t["name"]) or rx.search(t["description"])
+        ]
+
+    return _safe(_do)
+
+
+def _galaxy_show_tool(body: str, **_: Any) -> str:
+    tool_id = body.strip()
+    try:
+        parsed = json.loads(tool_id)
+        if isinstance(parsed, dict):
+            tool_id = parsed.get("tool_id", "")
+    except json.JSONDecodeError:
+        pass
+
+    if not tool_id:
+        return "ERROR: Provide a tool_id string."
 
     def _do():
         gi = _gi()
-        results = gi.tools.get_tools(q=query)
-        simplified = [
-            {
-                "id": t.get("id"),
-                "name": t.get("name"),
-                "version": t.get("version"),
-                "description": t.get("description", ""),
-            }
-            for t in (results or [])
-        ]
-        return simplified[:50]  # cap at 50 results
+        return gi.tools.show_tool(tool_id, io_details=True)
 
     return _safe(_do)
 
@@ -402,6 +450,7 @@ TOOLS = {
     "galaxy_wait_for_job": _galaxy_wait_for_job,
     "galaxy_download": _galaxy_download,
     "galaxy_search_tools": _galaxy_search_tools,
+    "galaxy_show_tool": _galaxy_show_tool,
     "galaxy_create_history": _galaxy_create_history,
     "galaxy_get_histories": _galaxy_get_histories,
     "galaxy_show_dataset": _galaxy_show_dataset,
@@ -435,8 +484,15 @@ TOOL_DESCRIPTIONS = {
         "Body: JSON with 'dataset_id' and 'output_path' (relative to workspace)."
     ),
     "galaxy_search_tools": (
-        "Search for tools available on the Galaxy server. "
-        "Body: plain-text search query string."
+        "Search for tools on the Galaxy server using a regex pattern matched against "
+        "tool id, name, and description. Body: regex string, e.g. 'bwa|bowtie2|hisat2'. "
+        "Returns id, name, description, and section for each match. "
+        "Call galaxy_show_tool next to see the input schema before running."
+    ),
+    "galaxy_show_tool": (
+        "Return full metadata for a Galaxy tool, including its input and output parameter "
+        "schema (use this to learn what 'inputs' dict to pass to galaxy_run_tool). "
+        "Body: tool_id string."
     ),
     "galaxy_create_history": (
         "Create a new Galaxy history and return its ID. Body: history name string."
@@ -457,22 +513,27 @@ You have access to a Galaxy server via the BioBlend skill.  The server URL and
 API key are set in the environment variables GALAXY_URL and GALAXY_API_KEY.
 
 Use these tools to interact with Galaxy:
-- `galaxy_get_histories` — list recent histories
-- `galaxy_create_history` — create a new history; returns history_id
-- `galaxy_upload` — upload a file from the workspace to a history
-- `galaxy_search_tools` — find tool IDs by name
-- `galaxy_run_tool` — execute a tool; returns job and dataset IDs
-- `galaxy_invoke_workflow` — run a workflow
-- `galaxy_job_status` — check job/dataset state
-- `galaxy_wait_for_job` — block until a job completes (use before downloading)
-- `galaxy_download` — download a result dataset to the workspace
-- `galaxy_show_dataset` — inspect dataset metadata
+- galaxy_get_histories — list recent histories
+- galaxy_create_history — create a new history; returns history_id
+- galaxy_upload — upload a file from the workspace to a history
+- galaxy_search_tools — find tools by regex pattern matched against id, name, description
+- galaxy_show_tool — get a tool's full input/output schema by tool_id
+- galaxy_run_tool — execute a tool; returns job and dataset IDs
+- galaxy_invoke_workflow — run a workflow
+- galaxy_job_status — check job/dataset state
+- galaxy_wait_for_job — block until a job completes (use before downloading)
+- galaxy_download — download a result dataset to the workspace
+- galaxy_show_dataset — inspect dataset metadata
 
 Typical flow:
 1. Create or identify a history (galaxy_create_history / galaxy_get_histories)
 2. Upload input files (galaxy_upload)
-3. Search for the tool (galaxy_search_tools) to confirm the exact tool_id
-4. Run the tool (galaxy_run_tool) — note the returned dataset IDs
-5. Wait for completion (galaxy_wait_for_job)
-6. Download results (galaxy_download)
+3. Find the tool: galaxy_search_tools with a regex like 'bwa|bowtie2' — returns tool_id
+4. Inspect its inputs: galaxy_show_tool — learn the exact parameter names and types
+5. Run the tool: galaxy_run_tool with the correct inputs dict
+6. Wait for completion: galaxy_wait_for_job
+7. Download results: galaxy_download
+
+Never call galaxy_run_tool without first calling galaxy_show_tool — the inputs
+dict is tool-specific and cannot be guessed without seeing the schema.
 """
