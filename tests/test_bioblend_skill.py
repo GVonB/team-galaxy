@@ -191,17 +191,47 @@ def test_galaxy_search_tools_success(monkeypatch):
     monkeypatch.setenv("GALAXY_API_KEY", "testkey")
 
     mock_gi = MagicMock()
-    mock_gi.tools.get_tools.return_value = [
-        {"id": "samtools_sort/1.0", "name": "SAMtools sort", "version": "1.0", "description": "Sort"},
+    mock_gi.tools.get_tool_panel.return_value = [
+        {"name": "SAM/BAM", "elems": [
+            {"id": "samtools_sort/1.0", "name": "SAMtools sort",
+             "description": "Sort", "model_class": "Tool"},
+        ]},
     ]
 
     from team_galaxy.skills import bioblend as bioblend_mod
+    bioblend_mod._tool_panel_cache.clear()
     with patch.object(bioblend_mod, "_gi", return_value=mock_gi):
         result = bioblend_mod._galaxy_search_tools("samtools")
 
     data = json.loads(result)
     assert len(data) == 1
     assert data[0]["name"] == "SAMtools sort"
+
+
+def test_galaxy_search_tools_caps_and_stays_under_budget(monkeypatch):
+    """A pattern matching everything must cap results and not exceed _MAX_OUTPUT."""
+    monkeypatch.setenv("GALAXY_URL", "https://test.galaxy.org")
+    monkeypatch.setenv("GALAXY_API_KEY", "testkey")
+
+    # 500 tools with realistic long toolshed ids + long descriptions
+    elems = [
+        {"id": f"toolshed.g2.bx.psu.edu/repos/iuc/tool_{i:03}/tool_{i:03}/1.0.0",
+         "name": f"Tool {i}", "description": "d" * 200, "model_class": "Tool"}
+        for i in range(500)
+    ]
+    mock_gi = MagicMock()
+    mock_gi.tools.get_tool_panel.return_value = [{"name": "All", "elems": elems}]
+
+    from team_galaxy.skills import bioblend as bioblend_mod
+    bioblend_mod._tool_panel_cache.clear()
+    with patch.object(bioblend_mod, "_gi", return_value=mock_gi):
+        result = bioblend_mod._galaxy_search_tools(".")  # matches every tool
+
+    data = json.loads(result)  # must parse — i.e. not truncated mid-structure
+    assert len(data) == bioblend_mod._SEARCH_CAP            # capped
+    assert len(result) <= bioblend_mod._MAX_OUTPUT          # under budget
+    assert all(len(t["description"]) <= 120 for t in data)  # description bounded
+    assert "\n" not in result                               # compact
 
 
 # --------------------------------------------------------------------------- #

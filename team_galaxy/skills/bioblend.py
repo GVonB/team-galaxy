@@ -106,6 +106,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 _MAX_OUTPUT = 4096
+_SEARCH_CAP = 15
 
 # Tool panel cache, populated on first fetch
 # empty = not yet fetched, [0] = flat list of tool dicts
@@ -135,11 +136,13 @@ def _gi():
     return GalaxyInstance(url, key=key)
 
 
-def _safe(fn, *args, **kwargs) -> str:
+def _safe(fn, *args, compact: bool = False, **kwargs) -> str:
     """Call *fn* and return its string result, or an ERROR string on exception."""
     try:
         result = fn(*args, **kwargs)
-        out = json.dumps(result, indent=2, default=str)
+        separators = (",", ":") if compact else (", ", ": ")
+        indent = None if compact else 2
+        out = json.dumps(result, indent=indent, separators=separators, default=str)
         return out[:_MAX_OUTPUT] if len(out) > _MAX_OUTPUT else out
     except Exception as exc:  # noqa: BLE001
         return f"ERROR: {exc}"
@@ -370,13 +373,14 @@ def _galaxy_search_tools(body: str, **_: Any) -> str:
         return f"ERROR: Invalid regex: {exc}"
 
     def _do():
+        max_desc_len = 120
         return [
-            {"id": t["id"], "name": t["name"], "description": t["description"], "section": t["section"]}
+            {"id": t["id"], "name": t["name"], "description": t["description"][:max_desc_len], "section": t["section"]}
             for t in _get_panel_flat()
             if rx.search(t["name"]) or rx.search(t["description"])
-        ]
+        ][:_SEARCH_CAP]
 
-    return _safe(_do)
+    return _safe(_do, compact=True)
 
 
 def _galaxy_show_tool(body: str, **_: Any) -> str:
