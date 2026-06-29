@@ -64,9 +64,16 @@ Available tools
         {"dataset_id": "<did>", "output_path": "results/output.bam"}
 
 ``galaxy_search_tools``
-    Search for tools available on the Galaxy server.
+    Search for tools on the Galaxy server using a regex pattern matched against
+    tool name and description.
 
-    Body: plain-text search query string.
+    Body: regex string, e.g. ``bwa|bowtie2|hisat2``.
+
+``galaxy_show_tool``
+    Return a tool's input/output schema.  Use this before galaxy_run_tool to
+    learn the exact parameter names and types.
+
+    Body: tool_id string.
 
 ``galaxy_create_history``
     Create a new history and return its ID.
@@ -171,7 +178,10 @@ def _get_panel_flat() -> list[dict]:
 
 
 def _galaxy_upload(body: str, *, workspace_path: Path | None = None, **_: Any) -> str:
-    params = _parse_json(body)
+    try:
+        params = _parse_json(body)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
     history_id = params.get("history_id", "")
     file_path = params.get("file_path", "")
     file_type = params.get("file_type", "auto")
@@ -363,7 +373,7 @@ def _galaxy_search_tools(body: str, **_: Any) -> str:
         return [
             {"id": t["id"], "name": t["name"], "description": t["description"], "section": t["section"]}
             for t in _get_panel_flat()
-            if rx.search(t["id"]) or rx.search(t["name"]) or rx.search(t["description"])
+            if rx.search(t["name"]) or rx.search(t["description"])
         ]
 
     return _safe(_do)
