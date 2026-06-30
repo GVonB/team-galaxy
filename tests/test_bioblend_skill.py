@@ -191,17 +191,185 @@ def test_galaxy_search_tools_success(monkeypatch):
     monkeypatch.setenv("GALAXY_API_KEY", "testkey")
 
     mock_gi = MagicMock()
-    mock_gi.tools.get_tools.return_value = [
-        {"id": "samtools_sort/1.0", "name": "SAMtools sort", "version": "1.0", "description": "Sort"},
+    mock_gi.tools.get_tool_panel.return_value = [
+        {"name": "SAM/BAM", "elems": [
+            {"id": "samtools_sort/1.0", "name": "SAMtools sort",
+             "description": "Sort", "model_class": "Tool"},
+        ]},
     ]
 
     from team_galaxy.skills import bioblend as bioblend_mod
+    bioblend_mod._tool_panel_cache.clear()
     with patch.object(bioblend_mod, "_gi", return_value=mock_gi):
         result = bioblend_mod._galaxy_search_tools("samtools")
 
     data = json.loads(result)
     assert len(data) == 1
     assert data[0]["name"] == "SAMtools sort"
+
+
+def test_galaxy_search_tools_caps_and_stays_under_budget(monkeypatch):
+    """A pattern matching everything must cap results and not exceed _MAX_OUTPUT."""
+    monkeypatch.setenv("GALAXY_URL", "https://test.galaxy.org")
+    monkeypatch.setenv("GALAXY_API_KEY", "testkey")
+
+    # 500 tools with realistic long toolshed ids + long descriptions
+    elems = [
+        {"id": f"toolshed.g2.bx.psu.edu/repos/iuc/tool_{i:03}/tool_{i:03}/1.0.0",
+         "name": f"Tool {i}", "description": "d" * 200, "model_class": "Tool"}
+        for i in range(500)
+    ]
+    mock_gi = MagicMock()
+    mock_gi.tools.get_tool_panel.return_value = [{"name": "All", "elems": elems}]
+
+    from team_galaxy.skills import bioblend as bioblend_mod
+    bioblend_mod._tool_panel_cache.clear()
+    with patch.object(bioblend_mod, "_gi", return_value=mock_gi):
+        result = bioblend_mod._galaxy_search_tools(".")  # matches every tool
+
+    data = json.loads(result)  # must parse — i.e. not truncated mid-structure
+    assert len(data) == bioblend_mod._SEARCH_CAP            # capped
+    assert len(result) <= bioblend_mod._MAX_OUTPUT          # under budget
+    assert all(len(t["description"]) <= 120 for t in data)  # description bounded
+    assert "\n" not in result                               # compact
+
+
+# --------------------------------------------------------------------------- #
+# Tool: galaxy_show_tool  (flat default-path form)
+# --------------------------------------------------------------------------- #
+
+
+def _mock_tool_schema():
+    """A tiny tool shaped like a real one: a conditional with a hidden second
+    case, plus a select whose option list is longer than the cap."""
+    return {
+        "id": "test_tool/1.0",
+        "name": "Test Tool",
+        "inputs": [
+            {
+                "name": "library",
+                "type": "conditional",
+                "test_param": {
+                    "name": "type",
+                    "type": "select",
+                    "label": "single or paired",
+                    "value": "single",  # default case
+                    "options": [["Single", "single", True], ["Paired", "paired", False]],
+                },
+                "cases": [
+                    {"value": "single", "inputs": [
+                        {"name": "input_1", "type": "data", "label": "FASTQ",
+                         "extensions": ["fastqsanger"]},
+                    ]},
+                    {"value": "paired", "inputs": [
+                        {"name": "input_1", "type": "data"},
+                        {"name": "input_2", "type": "data"},  # hidden: not on default path
+                    ]},
+                ],
+            },
+            {
+                "name": "ref",
+                "type": "select",
+                "label": "genome",
+                "value": "g0",
+                "options": [[f"g{i}", f"g{i}", False] for i in range(20)],
+            },
+        ],
+        "outputs": [{"name": "out", "format": "bam"}],
+    }
+
+
+def test_flatten_default_path_follows_default_case_and_joins_keys():
+    from team_galaxy.skills.bioblend import _flatten_default_path
+    fields = _flatten_default_path(_mock_tool_schema()["inputs"])
+    keys = [f["key"] for f in fields]
+
+    assert "library|type" in keys          # selector, flattened
+    assert "library|input_1" in keys       # default (single) case input
+    assert "library|input_2" not in keys   # paired case is hidden
+    selector = next(f for f in fields if f["key"] == "library|type")
+    assert selector["branch"] is True
+    inp = next(f for f in fields if f["key"] == "library|input_1")
+    assert inp["type"] == "data"
+    assert inp["extensions"] == ["fastqsanger"]
+
+
+def test_flatten_caps_options_and_reports_total():
+    from team_galaxy.skills.bioblend import _flatten_default_path, _OPTIONS_CAP
+    fields = _flatten_default_path(_mock_tool_schema()["inputs"])
+    ref = next(f for f in fields if f["key"] == "ref")
+    assert len(ref["options"]) == _OPTIONS_CAP
+    assert ref["options_n"] == 20  # total before the cap
+
+
+def test_galaxy_show_tool_returns_valid_flat_form(monkeypatch):
+    monkeypatch.setenv("GALAXY_URL", "https://test.galaxy.org")
+    monkeypatch.setenv("GALAXY_API_KEY", "testkey")
+
+    mock_gi = MagicMock()
+    mock_gi.tools.show_tool.return_value = _mock_tool_schema()
+
+    from team_galaxy.skills import bioblend as bioblend_mod
+    with patch.object(bioblend_mod, "_gi", return_value=mock_gi):
+        result = bioblend_mod._galaxy_show_tool("test_tool/1.0")
+
+    data = json.loads(result)  # must be valid JSON
+    assert len(result) <= bioblend_mod._SCHEMA_MAX_OUTPUT
+    assert data["id"] == "test_tool/1.0"
+    assert {p["key"] for p in data["params"]} >= {"library|type", "library|input_1", "ref"}
+    mock_gi.tools.show_tool.assert_called_once_with("test_tool/1.0", io_details=True)
+
+
+def test_galaxy_show_tool_no_tool_id():
+    from team_galaxy.skills.bioblend import _galaxy_show_tool
+    assert _galaxy_show_tool("   ").startswith("ERROR")
+
+
+# --------------------------------------------------------------------------- #
+# Error extraction: _tool_error + galaxy_run_tool react path
+# --------------------------------------------------------------------------- #
+
+
+class _FakeConnError(Exception):
+    """Mimics bioblend.ConnectionError: carries the raw response body."""
+    def __init__(self, body):
+        super().__init__(f"Unexpected HTTP status code: 400: {body}")
+        self.body = body
+
+
+def test_tool_error_prefers_flattened_err_data():
+    from team_galaxy.skills.bioblend import _tool_error
+    body = json.dumps({
+        "err_msg": "Parameter 'input_2': required",
+        "err_data": {"library|input_2": "Parameter 'input_2': required"},
+    })
+    msg = _tool_error(_FakeConnError(body))
+    assert "library|input_2" in msg  # the flattened key the agent must add
+
+
+def test_tool_error_falls_back_to_err_msg_then_str():
+    from team_galaxy.skills.bioblend import _tool_error
+    only_msg = _tool_error(_FakeConnError(json.dumps({"err_msg": "Tool not found."})))
+    assert only_msg == "Tool not found."
+    plain = _tool_error(ValueError("boom"))  # no .body
+    assert plain == "boom"
+
+
+def test_galaxy_run_tool_surfaces_param_error(monkeypatch):
+    monkeypatch.setenv("GALAXY_URL", "https://test.galaxy.org")
+    monkeypatch.setenv("GALAXY_API_KEY", "testkey")
+
+    body = json.dumps({"err_data": {"library|input_1": "specify a dataset"}})
+    mock_gi = MagicMock()
+    mock_gi.tools.run_tool.side_effect = _FakeConnError(body)
+
+    from team_galaxy.skills import bioblend as bioblend_mod
+    with patch.object(bioblend_mod, "_gi", return_value=mock_gi):
+        result = bioblend_mod._galaxy_run_tool(
+            json.dumps({"history_id": "h1", "tool_id": "t1", "inputs": {}})
+        )
+    assert result.startswith("ERROR running tool:")
+    assert "library|input_1" in result
 
 
 # --------------------------------------------------------------------------- #
